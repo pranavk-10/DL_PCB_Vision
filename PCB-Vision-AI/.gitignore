@@ -1,0 +1,91 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Environment variables and secrets
+.env
+.env.*
+!.env.example
+
+# Jupyter
+.ipynb_checkpoints/
+
+# IDEs
+.vscode/
+.idea/
+
+# Operating system
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Dataset files (also preserve README files in nested directories)
+data/raw/*
+data/processed/*
+data/raw/**/*
+data/processed/**/*
+!data/raw/**/
+!data/processed/**/
+!data/raw/**/README.md
+!data/processed/**/README.md
+!data/raw/README.md
+!data/processed/README.md
+
+# Trained model artifacts, including artifacts in nested directories
+models/*.keras
+models/*.h5
+models/*.pkl
+models/*.joblib
+models/*.weights.h5
+models/**/*.keras
+models/**/*.h5
+models/**/*.pkl
+models/**/*.joblib
+models/**/*.weights.h5
+models/**/*.onnx
+models/**/*.pb
+models/**/*.tflite
+models/**/*.pt
+models/**/*.pth
+models/**/*.ckpt*
+models/**/*.index
+models/**/*.data-*-of-*
+models/**/saved_model/**
+!models/**/saved_model/**/
+!models/**/README.md
+
+# Experiment outputs (also preserve nested README files)
+results/figures/*
+results/metrics/*
+results/figures/**/*
+results/metrics/**/*
+!results/figures/**/
+!results/metrics/**/
+!results/figures/**/README.md
+!results/metrics/**/README.md
+!results/figures/README.md
+!results/metrics/README.md
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+
+# TensorFlow
+logs/fit/
+
+# Test caches, browser inspection artifacts, and cached distribution wheels
+.pytest_cache/
+.taste-skill/
+wheels/

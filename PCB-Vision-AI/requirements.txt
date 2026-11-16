@@ -1,0 +1,19 @@
+# Target: 64-bit CPython 3.11 on Windows. Run scripts/verify_environment.py
+# after installation; this file alone is not evidence of a working environment.
+# TensorFlow 2.20 accepts NumPy >=1.26; OpenCV 4.12 requires NumPy >=2,<2.3.
+tensorflow==2.20.0
+numpy==2.2.6
+opencv-python==4.12.0.88
+pandas==2.3.3
+matplotlib==3.10.7
+scikit-learn==1.7.2
+streamlit==1.50.0
+jupyter==1.1.1
+notebook==7.4.7
+ipykernel==6.30.1
+pillow==11.3.0
+
+# Notebook validation/execution and the actual test suite
+nbformat==5.10.4
+nbclient==0.10.2
+pytest==8.4.2
