@@ -1,0 +1,36 @@
+"""Configuration package for PCB Vision AI."""
+from .config import (
+    PROJECT_ROOT,
+    DATA_RAW_DIR,
+    DATA_PROCESSED_DIR,
+    MODELS_DIR,
+    RESULTS_DIR,
+    FIGURES_DIR,
+    METRICS_DIR,
+    DATASET_CONFIG,
+    AUGMENTATION_CONFIG,
+    MODEL_CONFIG,
+    LOCALIZATION_CONFIG,
+    DatasetConfig,
+    AugmentationConfig,
+    ModelConfig,
+    LocalizationConfig,
+)
+
+__all__ = [
+    "PROJECT_ROOT",
+    "DATA_RAW_DIR",
+    "DATA_PROCESSED_DIR",
+    "MODELS_DIR",
+    "RESULTS_DIR",
+    "FIGURES_DIR",
+    "METRICS_DIR",
+    "DATASET_CONFIG",
+    "AUGMENTATION_CONFIG",
+    "MODEL_CONFIG",
+    "LOCALIZATION_CONFIG",
+    "DatasetConfig",
+    "AugmentationConfig",
+    "ModelConfig",
+    "LocalizationConfig",
+]
