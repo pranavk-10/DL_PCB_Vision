@@ -155,26 +155,88 @@ class PCBDefectClassifier:
 
     def _fallback_heuristic_predict(self, tensor: np.ndarray) -> np.ndarray:
         """
-        Mathematically consistent feature-based response vector when weights file is absent.
-        Analyzes edge gradient density, void count, and copper area to generate realistic probabilities.
-        """
-        patch = tensor.squeeze()
-        # Compute gradient magnitude
-        gx = cv2.Sobel(patch, cv2.CV_32F, 1, 0)
-        gy = cv2.Sobel(patch, cv2.CV_32F, 0, 1)
-        grad_mag = np.mean(np.sqrt(gx**2 + gy**2))
-        copper_ratio = np.mean(patch < 0.5)
+        Feature-based heuristic classifier using image statistics when no trained model is available.
 
-        # Generate smooth softmax vector
+        Extracts real visual features from the patch:
+          - Gradient magnitude  → detects edges (open circuits create sharp missing-trace edges)
+          - Pixel variance      → high variance = texture-rich / damaged area
+          - Dark region ratio   → voids, burn marks, pinholes are very dark
+          - Bright blob ratio   → spurious copper = unexpected bright copper deposits
+          - Local contrast (std)→ high std = noisy/defective region
+          - Laplacian energy    → detects fine irregularities (spurs, mouse bites)
+
+        Classes:  0=Open, 1=Short, 2=MouseBite, 3=Spur, 4=Pinhole, 5=SpuriousCopper, 6=Normal
+        """
+        patch = tensor.squeeze().astype(np.float32)   # shape (128, 128)
+
+        # ── Core image statistics ────────────────────────────────────────────
+        mean_intensity  = float(np.mean(patch))
+        std_intensity   = float(np.std(patch))
+        dark_ratio      = float(np.mean(patch < 0.20))   # very dark pixels (voids/burns)
+        bright_ratio    = float(np.mean(patch > 0.80))   # very bright pixels (copper)
+        mid_ratio       = float(np.mean((patch >= 0.20) & (patch <= 0.80)))
+
+        # ── Gradient analysis (Sobel-equivalent via numpy if cv2 missing) ───
+        if cv2 is not None:
+            gx = cv2.Sobel(patch, cv2.CV_32F, 1, 0, ksize=3)
+            gy = cv2.Sobel(patch, cv2.CV_32F, 0, 1, ksize=3)
+            grad_mag = float(np.mean(np.sqrt(gx**2 + gy**2)))
+            # Laplacian energy for fine defect texture
+            lap = cv2.Laplacian(patch, cv2.CV_32F)
+            lap_energy = float(np.var(lap))
+        else:
+            # NumPy-only gradient approximation
+            gx = np.gradient(patch, axis=1)
+            gy = np.gradient(patch, axis=0)
+            grad_mag = float(np.mean(np.sqrt(gx**2 + gy**2)))
+            lap_energy = float(np.var(gx + gy))
+
+        # ── Normalise features to [0, 1] range ──────────────────────────────
+        # grad_mag for 8-bit normalised image typically 0.01 – 0.25
+        grad_norm  = min(grad_mag / 0.25, 1.0)
+        lap_norm   = min(lap_energy / 0.05, 1.0)
+        variance   = min(std_intensity / 0.35, 1.0)
+
+        # ── Heuristic score per class ────────────────────────────────────────
+        # Open Circuit  → thin dark line across bright copper area
+        #                 → high gradient + moderate dark_ratio
+        score_open   = 0.05 + 0.5 * grad_norm + 0.3 * dark_ratio - 0.2 * bright_ratio
+
+        # Short Circuit → unexpected copper bridge → high bright_ratio + high gradient
+        score_short  = 0.05 + 0.4 * bright_ratio + 0.3 * grad_norm - 0.2 * dark_ratio
+
+        # Mouse Bite    → semi-circular chunk missing from edge
+        #                 → high dark_ratio + moderate gradient + high laplacian
+        score_mbite  = 0.05 + 0.45 * dark_ratio + 0.2 * lap_norm + 0.2 * grad_norm
+
+        # Spur          → thin copper whisker → moderate bright, high laplacian
+        score_spur   = 0.05 + 0.35 * lap_norm + 0.25 * bright_ratio + 0.1 * grad_norm
+
+        # Pinhole       → small void in copper → isolated very dark pixels
+        #                 → dark_ratio moderate, low variance overall
+        score_pin    = 0.05 + 0.5 * dark_ratio + 0.2 * (1 - variance) - 0.1 * grad_norm
+
+        # Spurious Copper → unexpected copper deposit → bright_ratio dominant
+        score_spur_cu = 0.05 + 0.55 * bright_ratio + 0.2 * variance - 0.1 * dark_ratio
+
+        # Normal        → uniform, low variance, mid-range intensity
+        #                 → penalised by dark extremes and high gradient
+        score_normal  = (0.60 * (1 - dark_ratio)
+                        * (1 - bright_ratio)
+                        * (1 - grad_norm)
+                        * (1 - lap_norm)
+                        + 0.05)
+
         scores = np.array([
-            0.10 + 0.2 * grad_mag,       # Open
-            0.10 + 0.3 * (1 - copper_ratio), # Short
-            0.08 + 0.1 * grad_mag,       # Mousebite
-            0.08 + 0.1 * copper_ratio,   # Spur
-            0.08 + 0.2 * (1 - grad_mag), # Pinhole
-            0.08 + 0.15 * copper_ratio,  # Spurious Copper
-            0.48                         # Normal (default dominant)
+            max(score_open,    0.0),
+            max(score_short,   0.0),
+            max(score_mbite,   0.0),
+            max(score_spur,    0.0),
+            max(score_pin,     0.0),
+            max(score_spur_cu, 0.0),
+            max(score_normal,  0.0),
         ], dtype=np.float32)
 
+        # Softmax for calibrated probabilities
         exp_scores = np.exp(scores - np.max(scores))
         return exp_scores / np.sum(exp_scores)

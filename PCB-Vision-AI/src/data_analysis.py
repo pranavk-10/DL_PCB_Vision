@@ -18,9 +18,13 @@ try:
     import cv2
 except ImportError:
     cv2 = None
-import matplotlib
-matplotlib.use("Agg")  # Headless backend for reliable server/script plotting
-import matplotlib.pyplot as plt
+try:
+    import matplotlib
+    matplotlib.use("Agg")  # Headless backend for reliable server/script plotting
+    import matplotlib.pyplot as plt
+except ImportError:
+    matplotlib = None
+    plt = None
 
 from config.config import (
     DATASET_CONFIG, FIGURES_DIR, METRICS_DIR,
@@ -47,7 +51,7 @@ def plot_class_distribution(
     class_counts: Dict[str, int],
     save_path: Optional[Path] = None,
     title: str = "DeepPCB Defect Class Distribution"
-) -> plt.Figure:
+) -> Any:
     """Creates a stylized horizontal bar plot of class counts with percentage annotations."""
     fig, ax = plt.subplots(figsize=(10, 5.5), dpi=150)
     
@@ -92,7 +96,7 @@ def plot_class_distribution(
 def plot_bbox_dimensions(
     samples: List[PCBSample],
     save_path: Optional[Path] = None
-) -> plt.Figure:
+) -> Any:
     """Plots scatter and histograms of bounding box width vs height."""
     widths = [b.width for s in samples for b in s.boxes]
     heights = [b.height for s in samples for b in s.boxes]
@@ -190,7 +194,7 @@ def plot_patch_gallery(
     class_labels: List[str] = DATASET_CONFIG.class_labels,
     num_per_class: int = 4,
     save_path: Optional[Path] = None
-) -> plt.Figure:
+) -> Any:
     """
     Renders an illustrative gallery showing representative 128x128 patches
     for each of the 7 defect/normal classes.

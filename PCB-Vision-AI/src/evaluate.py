@@ -17,9 +17,13 @@ import logging
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Tuple
 import numpy as np
-import matplotlib
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
+try:
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+except ImportError:
+    matplotlib = None
+    plt = None
 try:
     import seaborn as sns
 except ImportError:
@@ -102,7 +106,7 @@ def plot_learning_curves(
     history: Dict[str, list],
     save_path_loss: Optional[Path] = None,
     save_path_acc: Optional[Path] = None
-) -> Tuple[plt.Figure, plt.Figure]:
+) -> Tuple[Any, Any]:
     """Plots and saves separate loss and accuracy training/validation curves."""
     epochs = range(1, len(history["loss"]) + 1)
 
@@ -150,7 +154,7 @@ def plot_confusion_matrix(
     class_labels: List[str] = DATASET_CONFIG.class_labels,
     normalize: bool = False,
     save_path: Optional[Path] = None
-) -> plt.Figure:
+) -> Any:
     """Plots a clear annotated confusion matrix heatmap."""
     fig, ax = plt.subplots(figsize=(9, 7.5), dpi=150)
     
@@ -195,7 +199,7 @@ def plot_confusion_matrix(
 def plot_per_class_metrics(
     per_class_report: Dict[str, Dict[str, float]],
     save_path: Optional[Path] = None
-) -> plt.Figure:
+) -> Any:
     """Plots a grouped horizontal or vertical bar chart of Precision, Recall, and F1."""
     classes = list(per_class_report.keys())
     precisions = [per_class_report[c]["precision"] * 100 for c in classes]
@@ -231,7 +235,7 @@ def plot_per_class_metrics(
 def plot_model_comparison(
     models_metrics: Dict[str, Dict[str, float]],
     save_path: Optional[Path] = None
-) -> plt.Figure:
+) -> Any:
     """Plots comparative metrics across experimental configurations."""
     names = list(models_metrics.keys())
     accuracies = [models_metrics[m].get("accuracy", 0.0) * 100 for m in names]
