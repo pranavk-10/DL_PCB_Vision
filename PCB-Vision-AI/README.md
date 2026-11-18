@@ -224,10 +224,10 @@ python project_cli.py validate --raw-dir data\raw\DeepPCB
 python project_cli.py preprocess --raw-dir data\raw\DeepPCB
 ```
 
-### Step 4: Train the Custom CNN
-```cmd
-python project_cli.py train --epochs 25 --batch-size 32 --learning-rate 0.001
-```
+### Step 4: Train the Custom CNN with a GPU
+Open `notebooks/PCB_Vision_AI_DeepPCB_GPU_Training.ipynb` in Google Colab, select a GPU runtime, and run all cells. The notebook verifies TensorFlow GPU access and refuses CPU training, uses the official DeepPCB trainval/test split, evaluates the untouched test split, and exports the best `.keras` checkpoint with its matching metadata to Google Drive. Download both files into `models/` once. Training is not repeated when launching the dashboard.
+
+The official dataset is around 1–2 GB. Colab GPU availability and training duration vary; the runtime may disconnect during long jobs.
 
 ### Step 5: Evaluate the Untouched Test Split
 ```cmd
@@ -243,6 +243,12 @@ streamlit run app.py
 ```cmd
 venv\Scripts\python.exe -m pytest tests -v
 ```
+
+### Daily use after the one-time GPU training/export
+```cmd
+python -m streamlit run app.py
+```
+Open **PCB Image Inspection**, upload a PNG/JPG/JPEG/BMP image, and the dashboard automatically displays it and runs inference. Full-board boxes are coarse sliding-window regions from the patch classifier, not precision detector boxes.
 
 ---
 

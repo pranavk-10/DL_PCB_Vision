@@ -255,7 +255,8 @@ elif nav_choice == "🔬 PCB Image Inspection":
                 try:
                     height, width = uploaded_rgb.shape[:2]
                     if height <= 128 and width <= 128:
-                        prediction = classifier.predict_patch(uploaded_rgb)
+                        patch_bgr = cv2.cvtColor(uploaded_rgb, cv2.COLOR_RGB2BGR)
+                        prediction = classifier.predict_patch(patch_bgr)
                         if prediction["predicted_class"] == "Normal":
                             st.success(
                                 f"**Prediction: Normal** — confidence {prediction['confidence']:.1%}"

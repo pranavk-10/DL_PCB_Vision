@@ -77,6 +77,14 @@ def command_train(args):
         raise SystemExit("TensorFlow is unavailable; install requirements.txt before training.")
     import tensorflow as tf
 
+    gpus = tf.config.list_physical_devices("GPU")
+    if not gpus:
+        raise SystemExit(
+            "No TensorFlow-compatible GPU is available. Training was not started. "
+            "Use the GPU-only DeepPCB Colab notebook."
+        )
+    for gpu in gpus:
+        tf.config.experimental.set_memory_growth(gpu, True)
     tf.keras.utils.set_random_seed(DATASET_CONFIG.random_seed)
     processed_path = Path(args.processed)
     if not processed_path.exists():
