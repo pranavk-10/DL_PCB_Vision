@@ -53,3 +53,7 @@ models/*.h5
 
 # Streamlit config
 .streamlit/
+
+# Documents & PDFs (user strictly requested not to track PDFs in git)
+*.pdf
+**/*.pdf

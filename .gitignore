@@ -1,0 +1,15 @@
+# Root .gitignore for DL_PCB_Vision
+*.pdf
+**/*.pdf
+venv/
+PCB-Vision-AI/venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ipynb_checkpoints/
+.vscode/
+.idea/
+PCB-Vision-AI/data/processed/*.npz
+PCB-Vision-AI/models/*.keras
+PCB-Vision-AI/models/*.h5
+!PCB-Vision-AI/models/README.md
