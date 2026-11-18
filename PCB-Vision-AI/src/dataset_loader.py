@@ -193,12 +193,22 @@ class DeepPCBDatasetLoader:
                 parent_dir / f"{base_name}.png",
             ]
             test_img = next((c for c in candidate_tests if c.is_file()), None)
+            if test_img is None:
+                test_matches = list(self.raw_dir.rglob(f"{clean_base}_test.jpg"))
+                if not test_matches:
+                    test_matches = list(self.raw_dir.rglob(f"{clean_base}_test.png"))
+                test_img = test_matches[0] if test_matches else None
 
             candidate_temps = [
                 parent_dir / f"{clean_base}_temp.jpg",
                 parent_dir / f"{clean_base}_temp.png",
             ]
             temp_img = next((c for c in candidate_temps if c.is_file()), None)
+            if temp_img is None:
+                temp_matches = list(self.raw_dir.rglob(f"{clean_base}_temp.jpg"))
+                if not temp_matches:
+                    temp_matches = list(self.raw_dir.rglob(f"{clean_base}_temp.png"))
+                temp_img = temp_matches[0] if temp_matches else None
 
             if test_img is None:
                 logger.warning("Missing tested image for annotation: %s", annot_file)
