@@ -36,7 +36,7 @@ The project is a custom 128×128×1 TensorFlow/Keras PCB patch classifier with s
 | `src/preprocessing.py` | Read official split lists, retain the official test set, save class weights | Ensure correct final evaluation |
 | `src/dataset_loader.py` | Index nested images once for faster discovery; ignore split/README text files | Make real dataset scans efficient |
 | `src/inference.py` | Discover an existing checkpoint and validate paired metadata/class ordering | Automatic compatible model loading |
-| `app.py` | Decode uploads with PIL, display immediately, and infer automatically; show class confidence ahead of optional window coordinates | Fix preview and simplify the inspection flow |
+| `app.py` | Decode uploads with PIL, display immediately, and infer automatically; show class confidence ahead of optional window coordinates; plot training history from checkpoint metadata | Fix preview, simplify inspection, and show recorded training curves |
 | `tests/test_preprocessing.py` | Assert official split counts and separation | Verify test isolation |
 | `README.md` | Describe GPU Colab training and ordinary dashboard use | Avoid documenting local CPU training |
 
@@ -65,6 +65,7 @@ The custom three-block CNN, existing public data structures, synthetic benchmark
 - The metadata reports DeepPCB training on `/physical_device:GPU:0`, 21 completed epochs, best epoch 14, and best validation accuracy 98.72%. These are recorded checkpoint metadata, not an independent training-log audit.
 - Held-out test metrics have not been computed in this environment and are not reported as verified.
 - The current image-preview failure was traced to Streamlit media responses returning HTTP 500; the dashboard now renders images inline rather than through that endpoint.
+- The Model Performance learning-curves tab now reads the checkpoint's recorded history directly; the live page displays 21 epochs and 98.72% best validation accuracy at epoch 14.
 - The missing-model test now uses an isolated empty model path, so it remains valid when a real checkpoint is installed locally.
 
 ## G. Remaining limitations

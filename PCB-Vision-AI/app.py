@@ -364,6 +364,27 @@ elif nav_choice == "📊 Model Performance":
     st.markdown('<div class="main-header">Model Performance & Empirical Evaluation</div>', unsafe_allow_html=True)
     st.markdown('<div class="sub-header">Rigorous evaluation metrics on the held-out test set, including confusion matrices, per-class classification reports, and experimental comparisons.</div>', unsafe_allow_html=True)
 
+    training_metadata = {}
+    if classifier.is_loaded():
+        metadata_path = classifier.model_path.with_suffix(".metadata.json")
+        if metadata_path.is_file():
+            try:
+                loaded_metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError) as exc:
+                st.warning(f"Training history metadata could not be read: {exc}")
+            else:
+                if isinstance(loaded_metadata, dict):
+                    training_metadata = loaded_metadata
+    training_history = training_metadata.get("history", {})
+    if not isinstance(training_history, dict):
+        training_history = {}
+    history_keys = ("loss", "val_loss", "accuracy", "val_accuracy")
+    has_training_history = (
+        all(isinstance(training_history.get(key), list) for key in history_keys)
+        and len({len(training_history[key]) for key in history_keys}) == 1
+        and bool(training_history.get("loss"))
+    )
+
     # Check for existing evaluation metrics JSON
     metrics_path = METRICS_DIR / "final_evaluation_report.json"
     if metrics_path.exists():
@@ -392,20 +413,41 @@ elif nav_choice == "📊 Model Performance":
 
     with tab1:
         st.subheader("Training and Validation Dynamics")
-        col_l, col_r = st.columns(2)
-        loss_img = FIGURES_DIR / "loss_curves.png"
-        acc_img = FIGURES_DIR / "accuracy_curves.png"
-
-        with col_l:
-            if loss_img.exists():
-                st.image(str(loss_img), caption="Cross-Entropy Loss vs. Epochs", use_container_width=True)
-            else:
-                st.warning("Loss curves plot will be generated during model training.")
-        with col_r:
-            if acc_img.exists():
-                st.image(str(acc_img), caption="Accuracy (%) vs. Epochs", use_container_width=True)
-            else:
-                st.warning("Accuracy curves plot will be generated during model training.")
+        if has_training_history:
+            epochs = list(range(1, len(training_history["loss"]) + 1))
+            st.caption(
+                f"Recorded training history: {len(epochs)} epochs. "
+                f"Best validation accuracy: {max(training_history['val_accuracy']):.2%} "
+                f"(epoch {training_metadata.get('best_epoch', 'not recorded')})."
+            )
+            st.markdown("**Cross-entropy loss**")
+            st.line_chart(
+                {
+                    "Epoch": epochs,
+                    "Training": training_history["loss"],
+                    "Validation": training_history["val_loss"],
+                },
+                x="Epoch",
+                y=["Training", "Validation"],
+                x_label="Epoch",
+                y_label="Loss",
+                width="stretch",
+            )
+            st.markdown("**Accuracy**")
+            st.line_chart(
+                {
+                    "Epoch": epochs,
+                    "Training": training_history["accuracy"],
+                    "Validation": training_history["val_accuracy"],
+                },
+                x="Epoch",
+                y=["Training", "Validation"],
+                x_label="Epoch",
+                y_label="Accuracy",
+                width="stretch",
+            )
+        else:
+            st.info("No per-epoch training history is available in this checkpoint's metadata.")
 
     with tab2:
         st.subheader("Confusion Matrix")
