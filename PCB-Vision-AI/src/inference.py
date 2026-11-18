@@ -73,11 +73,13 @@ class PCBDefectClassifier:
     def __init__(
         self,
         model_path: Optional[Path] = None,
-        class_labels: List[str] = DATASET_CONFIG.class_labels
+        class_labels: List[str] = DATASET_CONFIG.class_labels,
+        allow_heuristic_fallback: bool = False
     ):
         self.class_labels = class_labels
         self.model_path = Path(model_path) if model_path else MODEL_CONFIG.cnn_model_path
         self.model = None
+        self.allow_heuristic_fallback = allow_heuristic_fallback
         self._load_model()
 
     def _load_model(self) -> None:
@@ -88,7 +90,14 @@ class PCBDefectClassifier:
 
         if self.model_path.exists():
             try:
-                self.model = load_model(str(self.model_path))
+                loaded_model = load_model(str(self.model_path))
+                input_shape = tuple(loaded_model.input_shape)
+                output_shape = tuple(loaded_model.output_shape)
+                if input_shape[1:] != (128, 128, 1):
+                    raise ValueError(f"Incompatible input shape {input_shape}; expected (None, 128, 128, 1)")
+                if output_shape[1] != len(self.class_labels):
+                    raise ValueError(f"Incompatible output shape {output_shape}; expected {len(self.class_labels)} classes")
+                self.model = loaded_model
                 logger.info("Successfully loaded CNN model from: %s", self.model_path)
             except Exception as e:
                 logger.error("Failed to load model from %s: %s", self.model_path, e)
@@ -116,10 +125,14 @@ class PCBDefectClassifier:
 
         if self.model is not None:
             raw_probs = self.model.predict(tensor, verbose=0)[0]
-        else:
-            # Deterministic academic heuristic fallback if model weights not yet trained
-            logger.warning("Model not loaded; computing heuristic feature response.")
+        elif self.allow_heuristic_fallback:
+            logger.warning("Model not loaded; using explicitly enabled heuristic fallback.")
             raw_probs = self._fallback_heuristic_predict(tensor)
+        else:
+            raise RuntimeError(
+                f"No compatible trained model is loaded at {self.model_path}. "
+                "Train the CNN or provide a valid .keras checkpoint before inference."
+            )
 
         # Enforce valid probability distribution (sum to 1.0)
         raw_probs = np.array(raw_probs, dtype=np.float64)

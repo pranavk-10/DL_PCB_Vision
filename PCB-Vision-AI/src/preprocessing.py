@@ -328,19 +328,33 @@ class PCBDataPipeline:
 
         # Compute balanced class weights to mitigate class distribution skew
         classes = np.unique(y_train)
-        weights_arr = compute_class_weight(
-            class_weight="balanced",
-            classes=classes,
-            y=y_train
-        )
-        class_weight_dict = {int(c): float(w) for c, w in zip(classes, weights_arr)}
+        if compute_class_weight is not None:
+            weights_arr = compute_class_weight(
+                class_weight="balanced",
+                classes=classes,
+                y=y_train
+            )
+            class_weight_dict = {int(c): float(w) for c, w in zip(classes, weights_arr)}
+        else:
+            counts = np.bincount(y_train, minlength=len(self.dataset_config.class_labels))
+            total = max(1, int(counts.sum()))
+            class_weight_dict = {
+                int(c): float(total / (len(classes) * max(1, int(counts[c]))))
+                for c in classes
+            }
 
         data_bundle = {
             "X_train": X_train, "y_train": y_train,
             "X_val": X_val, "y_val": y_val,
             "X_test": X_test, "y_test": y_test,
             "class_weights": class_weight_dict,
-            "class_labels": self.dataset_config.class_labels
+            "class_labels": self.dataset_config.class_labels,
+            "split_metadata": {
+                "train_samples": [s.sample_id for s in train_s],
+                "val_samples": [s.sample_id for s in val_s],
+                "test_samples": [s.sample_id for s in test_s],
+                "seed": self.dataset_config.random_seed,
+            }
         }
 
         if save_to_disk:
@@ -349,7 +363,11 @@ class PCBDataPipeline:
                 out_file,
                 X_train=X_train, y_train=y_train,
                 X_val=X_val, y_val=y_val,
-                X_test=X_test, y_test=y_test
+                X_test=X_test, y_test=y_test,
+                class_labels=np.asarray(self.dataset_config.class_labels, dtype=np.str_),
+                train_sample_ids=np.asarray([s.sample_id for s in train_s], dtype=np.str_),
+                val_sample_ids=np.asarray([s.sample_id for s in val_s], dtype=np.str_),
+                test_sample_ids=np.asarray([s.sample_id for s in test_s], dtype=np.str_),
             )
             logger.info("Saved processed dataset to: %s", out_file)
 
@@ -361,8 +379,8 @@ class PCBDataPipeline:
         npz_path = Path(npz_path)
         if not npz_path.exists():
             raise FileNotFoundError(f"Processed dataset not found at {npz_path}")
-        with np.load(npz_path) as data:
-            return {
+        with np.load(npz_path, allow_pickle=False) as data:
+            result = {
                 "X_train": data["X_train"],
                 "y_train": data["y_train"],
                 "X_val": data["X_val"],
@@ -370,3 +388,9 @@ class PCBDataPipeline:
                 "X_test": data["X_test"],
                 "y_test": data["y_test"]
             }
+            if "class_labels" in data:
+                result["class_labels"] = data["class_labels"].tolist()
+            for key in ("train_sample_ids", "val_sample_ids", "test_sample_ids"):
+                if key in data:
+                    result[key] = data[key].tolist()
+            return result

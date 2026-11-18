@@ -70,8 +70,8 @@ def apply_nms(
         for candidate in sorted_dets:
             # Calculate IoU
             iou = compute_iou(best["box"], candidate["box"])
-            # Keep if low overlap or different defect class
-            if iou < iou_threshold:
+            # Suppress only overlapping detections of the same defect class.
+            if iou < iou_threshold or best.get("class_idx") != candidate.get("class_idx"):
                 remaining.append(candidate)
 
         sorted_dets = remaining
@@ -128,24 +128,33 @@ class SlidingWindowInspector:
         else:
             gray = img.copy()
 
-        # Generate window coordinates
+        # Generate unique window coordinates, including right/bottom border windows.
         windows: List[Tuple[int, int, int, int]] = []
         patches: List[np.ndarray] = []
 
-        for y in range(0, h - win_h + 1, step):
-            for x in range(0, w - win_w + 1, step):
+        if h < win_h or w < win_w:
+            return {
+                "total_windows_scanned": 0,
+                "raw_candidates_found": 0,
+                "detections": [],
+                "annotated_image": self.render_overlay(img, []),
+                "original_image": img,
+                "error": f"Image is smaller than the {win_w}x{win_h} inspection window",
+            }
+
+        x_positions = list(range(0, max(1, w - win_w + 1), step))
+        y_positions = list(range(0, max(1, h - win_h + 1), step))
+        if x_positions[-1] != w - win_w:
+            x_positions.append(w - win_w)
+        if y_positions[-1] != h - win_h:
+            y_positions.append(h - win_h)
+
+        for y in y_positions:
+            for x in x_positions:
                 crop = gray[y:y + win_h, x:x + win_w]
                 crop_norm = (crop.astype(np.float32) / 255.0)[..., np.newaxis]
                 windows.append((x, y, x + win_w, y + win_h))
                 patches.append(crop_norm)
-
-        # Edge handling for remaining border pixels
-        if (h % step) != 0 and (h > win_h):
-            y = h - win_h
-            for x in range(0, w - win_w + 1, step):
-                crop = gray[y:y + win_h, x:x + win_w]
-                windows.append((x, y, x + win_w, y + win_h))
-                patches.append((crop.astype(np.float32) / 255.0)[..., np.newaxis])
 
         raw_detections: List[Dict[str, Any]] = []
 

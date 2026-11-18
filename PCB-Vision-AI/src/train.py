@@ -122,7 +122,28 @@ def train_model(
     history_dict = {k: [float(val) for val in v] for k, v in history.history.items()}
     history_dict["training_time_seconds"] = elapsed_time
 
+    best_epoch = int(np.argmin(history_dict.get("val_loss", history_dict["loss"]))) + 1
+    metadata_path = Path(save_path).with_suffix(".metadata.json")
+    metadata = {
+        "architecture": model.name,
+        "class_names": list(getattr(config, "class_labels", [])) if hasattr(config, "class_labels") else [
+            "Open Circuit", "Short Circuit", "Mouse Bite", "Spur", "Pinhole", "Spurious Copper", "Normal"
+        ],
+        "input_shape": list(config.input_shape if hasattr(config, "input_shape") else (128, 128, 1)),
+        "normalization": "grayscale_uint8_scaled_to_[0,1]",
+        "batch_size": bs,
+        "epochs_requested": num_epochs,
+        "learning_rate": config.learning_rate,
+        "random_seed": getattr(config, "random_seed", 42),
+        "best_epoch": best_epoch,
+        "history": history_dict,
+    }
+    metadata_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(metadata_path, "w", encoding="utf-8") as f:
+        json.dump(metadata, f, indent=2)
+
     logger.info("Completed training %s in %.2f seconds", model.name, elapsed_time)
+    logger.info("Saved training metadata to: %s", metadata_path)
     return model, history_dict, elapsed_time
 
 

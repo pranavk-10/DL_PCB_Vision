@@ -20,30 +20,32 @@ def test_preprocess_input_patch():
     assert 0.0 <= tensor.min() and tensor.max() <= 1.0
 
 
-def test_classifier_prediction_output_structure():
-    """Validates structure and probability constraints of prediction outputs."""
+def test_classifier_requires_trained_model_by_default():
+    """Prevents untrained heuristics from being presented as trained CNN predictions."""
     classifier = PCBDefectClassifier()
+    dummy_patch = np.random.randint(0, 255, (128, 128), dtype=np.uint8)
+
+    with pytest.raises(RuntimeError, match="No compatible trained model"):
+        classifier.predict_patch(dummy_patch)
+
+
+def test_explicit_heuristic_fallback_output_structure():
+    """Validates the explicitly opt-in heuristic fallback contract."""
+    classifier = PCBDefectClassifier(allow_heuristic_fallback=True)
     dummy_patch = np.random.randint(0, 255, (128, 128), dtype=np.uint8)
 
     res = classifier.predict_patch(dummy_patch)
 
-    assert "predicted_class" in res
-    assert "confidence" in res
-    assert "class_index" in res
-    assert "probabilities" in res
-
     assert res["predicted_class"] in DATASET_CONFIG.class_labels
     assert 0.0 <= res["confidence"] <= 1.0
     assert len(res["probabilities"]) == 7
-
-    # Check sum of probabilities equals 1.0
     prob_sum = sum(res["probabilities"].values())
     assert abs(prob_sum - 1.0) < 1e-4
 
 
-def test_batch_prediction():
-    """Validates batch prediction across multiple patches."""
-    classifier = PCBDefectClassifier()
+def test_batch_prediction_explicit_fallback():
+    """Validates explicit fallback batch prediction without implying trained inference."""
+    classifier = PCBDefectClassifier(allow_heuristic_fallback=True)
     patches = [np.full((128, 128), val, dtype=np.uint8) for val in [50, 150, 240]]
 
     batch_res = classifier.predict_batch(patches)
