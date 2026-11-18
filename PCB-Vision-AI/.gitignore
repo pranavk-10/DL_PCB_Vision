@@ -43,6 +43,9 @@ data/raw/*.png
 !data/raw/README.md
 data/processed/*.npz
 
+# Automatically generated held-out evaluation report
+results/metrics/final_evaluation_report.json
+
 # Model weights checkpoints (keep directory structure)
 models/*.keras
 models/*.h5

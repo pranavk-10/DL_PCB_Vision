@@ -63,21 +63,23 @@ The custom three-block CNN, existing public data structures, synthetic benchmark
 - TensorFlow 2.17.1 on this PC sees no GPU (`tf.config.list_physical_devices('GPU') == []`); no local CPU training was performed.
 - A local `models/pcb_cnn_best.keras` checkpoint is present (51,517,470 bytes), alongside its metadata sidecar; the app log confirms successful checkpoint loading.
 - The metadata reports DeepPCB training on `/physical_device:GPU:0`, 21 completed epochs, best epoch 14, and best validation accuracy 98.72%. These are recorded checkpoint metadata, not an independent training-log audit.
-- Held-out test metrics have not been computed in this environment and are not reported as verified.
+- Automatic held-out evaluation completed on the official DeepPCB test split: 500 boards and 4,640 patches, 97.37% accuracy, and 96.90% macro F1. The dashboard persists the report and reuses it until the checkpoint or split changes.
 - The current image-preview failure was traced to Streamlit media responses returning HTTP 500; the dashboard now renders images inline rather than through that endpoint.
-- The Model Performance learning-curves tab now reads the checkpoint's recorded history directly; the live page displays 21 epochs and 98.72% best validation accuracy at epoch 14.
+- The Model Performance page automatically prepares the official test patches, evaluates the installed checkpoint, and displays the saved metrics without a manual command. The learning-curves tab reads checkpoint history directly.
 - The missing-model test now uses an isolated empty model path, so it remains valid when a real checkpoint is installed locally.
 
 ## G. Remaining limitations
 - The real DeepPCB repository is present locally but is untracked and intentionally not committed.
 - The trained `.keras` checkpoint and metadata are local and intentionally not committed as model artifacts.
-- Final held-out test accuracy and macro F1 remain unverified until evaluation is run against the official test split.
 - Sliding-window patch classification is not anchor-based object detection and may produce coarse/localization-only results.
 - Template-image alignment is preserved in the loader, but full-board template difference subtraction is not yet an independent detector.
 - Normal patches remain statistically generated from regions outside annotations; they are not inferred from unknown IDs.
 - Full training/evaluation requires a Colab-accessible CUDA GPU, sufficient GPU memory, and a real dataset.
 
 ## H. Exact execution commands
+Normal dashboard use does not require separate dataset-evaluation commands. Test patches are prepared on the first visit to **Model Performance** and cached; the checkpoint is not retrained.
+
+The following commands are available for explicit dataset setup or developer workflows:
 ```cmd
 cd C:\Users\hp\Desktop\Projects\DL\PCB-Vision-AI
 venv\Scripts\activate.bat

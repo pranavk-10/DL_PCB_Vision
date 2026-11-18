@@ -229,10 +229,8 @@ Open `notebooks/PCB_Vision_AI_DeepPCB_GPU_Training.ipynb` in Google Colab, selec
 
 The official dataset is around 1–2 GB. Colab GPU availability and training duration vary; the runtime may disconnect during long jobs.
 
-### Step 5: Evaluate the Untouched Test Split
-```cmd
-python project_cli.py evaluate
-```
+### Step 5: Automatic Held-Out Evaluation
+No evaluation command is required. The first time you open **Model Performance** in the dashboard, it automatically prepares the official DeepPCB test patches, evaluates the installed checkpoint, and saves the real metrics. It reuses the saved results on later launches and only reevaluates when the checkpoint or official split files change.
 
 ### Step 6: Launch the Streamlit Dashboard
 ```cmd

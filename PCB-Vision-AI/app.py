@@ -16,6 +16,7 @@ import base64
 import html
 from pathlib import Path
 import numpy as np
+import pandas as pd
 import cv2
 from PIL import Image
 import streamlit as st
@@ -37,7 +38,6 @@ from config.config import (
     DATASET_CONFIG,
     MODEL_CONFIG,
     LOCALIZATION_CONFIG,
-    FIGURES_DIR,
     METRICS_DIR,
     MODELS_DIR,
 )
@@ -58,6 +58,159 @@ def display_inline_image(image_bytes: bytes, mime_type: str, caption: str) -> No
         f'</figure>',
         unsafe_allow_html=True
     )
+
+
+def get_deeppcb_split_files() -> tuple[Path, Path, Path]:
+    """Find DeepPCB's root and official split lists."""
+    for dataset_root in (DATASET_CONFIG.raw_dir / "DeepPCB", DATASET_CONFIG.raw_dir):
+        split_root = dataset_root / "PCBData"
+        trainval_path = split_root / "trainval.txt"
+        test_path = split_root / "test.txt"
+        if trainval_path.is_file() and test_path.is_file():
+            return dataset_root, trainval_path, test_path
+    raise FileNotFoundError(
+        "The official DeepPCB trainval.txt and test.txt files were not found under "
+        f"{DATASET_CONFIG.raw_dir}. Install the DeepPCB dataset before viewing test metrics."
+    )
+
+
+def load_or_create_official_test_set() -> tuple[np.ndarray, np.ndarray, list[str], dict[str, int]]:
+    """Load a cached official test set, or build it once from the real DeepPCB images."""
+    from src.dataset_loader import DeepPCBDatasetLoader
+    from src.preprocessing import PCBDataPipeline
+
+    dataset_root, trainval_path, test_path = get_deeppcb_split_files()
+    trainval_mtime = trainval_path.stat().st_mtime_ns
+    test_mtime = test_path.stat().st_mtime_ns
+    cache_path = DATASET_CONFIG.processed_dir / "pcb_test_dataset.npz"
+
+    if cache_path.is_file():
+        try:
+            with np.load(cache_path, allow_pickle=False) as cached:
+                cached_split_matches = (
+                    int(cached["trainval_mtime_ns"].item()) == trainval_mtime
+                    and int(cached["test_mtime_ns"].item()) == test_mtime
+                    and cached["class_labels"].tolist() == DATASET_CONFIG.class_labels
+                )
+                if cached_split_matches:
+                    return (
+                        cached["X_test"].copy(),
+                        cached["y_test"].copy(),
+                        cached["test_sample_ids"].tolist(),
+                        {
+                            "trainval_mtime_ns": trainval_mtime,
+                            "test_mtime_ns": test_mtime,
+                        },
+                    )
+        except (OSError, ValueError, KeyError):
+            st.warning("The cached DeepPCB test set is invalid; rebuilding it from the official split.")
+
+    def read_ids(split_path: Path) -> set[str]:
+        ids = set()
+        with split_path.open("r", encoding="utf-8") as split_file:
+            for line in split_file:
+                fields = line.strip().split()
+                if len(fields) >= 2:
+                    ids.add(Path(fields[1]).stem)
+        if not ids:
+            raise ValueError(f"The official split file contains no board IDs: {split_path}")
+        return ids
+
+    trainval_ids = read_ids(trainval_path)
+    test_ids = read_ids(test_path)
+    if trainval_ids & test_ids:
+        raise ValueError("The official DeepPCB trainval and test splits overlap.")
+
+    samples = DeepPCBDatasetLoader(raw_dir=dataset_root).scan_dataset()
+    samples_by_id = {sample.sample_id: sample for sample in samples}
+    missing_ids = test_ids - samples_by_id.keys()
+    if missing_ids:
+        raise ValueError(
+            f"{len(missing_ids)} official test boards are missing usable images or annotations."
+        )
+
+    test_samples = [samples_by_id[sample_id] for sample_id in sorted(test_ids)]
+    pipeline = PCBDataPipeline()
+    pipeline.dataset_config.raw_dir = dataset_root
+    X_test, y_test = pipeline.process_samples_to_dataset(
+        test_samples,
+        apply_augmentation=False,
+    )
+    if len(y_test) == 0:
+        raise ValueError("No test patches could be extracted from the official DeepPCB test split.")
+
+    DATASET_CONFIG.processed_dir.mkdir(parents=True, exist_ok=True)
+    np.savez_compressed(
+        cache_path,
+        X_test=X_test,
+        y_test=y_test,
+        class_labels=np.asarray(DATASET_CONFIG.class_labels, dtype=np.str_),
+        test_sample_ids=np.asarray(sorted(test_ids), dtype=np.str_),
+        trainval_mtime_ns=np.int64(trainval_mtime),
+        test_mtime_ns=np.int64(test_mtime),
+    )
+    return (
+        X_test,
+        y_test,
+        sorted(test_ids),
+        {"trainval_mtime_ns": trainval_mtime, "test_mtime_ns": test_mtime},
+    )
+
+
+def load_or_evaluate_checkpoint(classifier: PCBDefectClassifier) -> dict:
+    """Return saved test metrics, or evaluate and persist them for this checkpoint."""
+    from src.evaluate import evaluate_model_predictions
+
+    if not classifier.is_loaded() or classifier.model is None:
+        raise RuntimeError("The trained checkpoint is not loaded; automatic evaluation cannot run.")
+
+    _, trainval_path, test_path = get_deeppcb_split_files()
+    checkpoint_stat = classifier.model_path.stat()
+    evaluation_path = METRICS_DIR / "final_evaluation_report.json"
+    expected_metadata = {
+        "checkpoint_path": str(classifier.model_path.resolve()),
+        "checkpoint_size_bytes": checkpoint_stat.st_size,
+        "checkpoint_mtime_ns": checkpoint_stat.st_mtime_ns,
+        "trainval_mtime_ns": trainval_path.stat().st_mtime_ns,
+        "test_mtime_ns": test_path.stat().st_mtime_ns,
+    }
+
+    if evaluation_path.is_file():
+        try:
+            saved_report = json.loads(evaluation_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            st.warning(f"Saved evaluation results could not be read; recalculating them: {exc}")
+        else:
+            saved_metadata = (
+                saved_report.get("evaluation_metadata", {})
+                if isinstance(saved_report, dict) else {}
+            )
+            if all(saved_metadata.get(key) == value for key, value in expected_metadata.items()):
+                return saved_report
+
+    X_test, y_test, test_sample_ids, split_metadata = load_or_create_official_test_set()
+    probabilities = classifier.model.predict(
+        X_test,
+        batch_size=MODEL_CONFIG.batch_size,
+        verbose=0,
+    )
+    report = evaluate_model_predictions(
+        y_test,
+        np.asarray(probabilities),
+        DATASET_CONFIG.class_labels,
+    )
+    report["evaluation_metadata"] = {
+        **expected_metadata,
+        **split_metadata,
+        "dataset": "DeepPCB",
+        "split_method": "official DeepPCB test.txt; disjoint from trainval.txt",
+        "test_board_count": len(test_sample_ids),
+    }
+    METRICS_DIR.mkdir(parents=True, exist_ok=True)
+    temporary_path = evaluation_path.with_suffix(".tmp")
+    temporary_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
+    temporary_path.replace(evaluation_path)
+    return report
 
 
 # Professional Industrial Inspection Theme CSS
@@ -385,13 +538,23 @@ elif nav_choice == "📊 Model Performance":
         and bool(training_history.get("loss"))
     )
 
-    # Check for existing evaluation metrics JSON
-    metrics_path = METRICS_DIR / "final_evaluation_report.json"
-    if metrics_path.exists():
-        with open(metrics_path, "r", encoding="utf-8") as f:
-            eval_data = json.load(f)
+    eval_data = None
+    if classifier.is_loaded():
+        with st.spinner("Automatically evaluating the trained model on the official held-out DeepPCB split..."):
+            try:
+                eval_data = load_or_evaluate_checkpoint(classifier)
+            except (OSError, RuntimeError, ValueError) as exc:
+                st.error(f"Automatic DeepPCB test evaluation could not be completed: {exc}")
+        if eval_data:
+            evaluation_metadata = eval_data.get("evaluation_metadata", {})
+            st.caption(
+                f"Automatically evaluated {evaluation_metadata.get('test_board_count', 0)} "
+                f"official held-out boards and "
+                f"{eval_data['overall'].get('total_test_samples', 0)} test patches. "
+                "Results are saved and reused until the checkpoint or split changes."
+            )
     else:
-        eval_data = None
+        st.info("Install a compatible trained checkpoint to calculate DeepPCB test metrics automatically.")
 
     # Top Metric KPI row
     if eval_data and "overall" in eval_data:
@@ -401,8 +564,6 @@ elif nav_choice == "📊 Model Performance":
         m2.metric("Macro Precision", f"{ov.get('macro_precision', 0.0) * 100:.2f}%")
         m3.metric("Macro Recall", f"{ov.get('macro_recall', 0.0) * 100:.2f}%")
         m4.metric("Macro F1-Score", f"{ov.get('macro_f1', 0.0) * 100:.2f}%")
-    else:
-        st.info("ℹ️ Evaluation metrics will update automatically after running model evaluation (`python -m src.evaluate`).")
 
     tab1, tab2, tab3, tab4 = st.tabs([
         "📈 Learning Curves",
@@ -415,6 +576,16 @@ elif nav_choice == "📊 Model Performance":
         st.subheader("Training and Validation Dynamics")
         if has_training_history:
             epochs = list(range(1, len(training_history["loss"]) + 1))
+            loss_history = pd.DataFrame({
+                "Epoch": epochs,
+                "Training": training_history["loss"],
+                "Validation": training_history["val_loss"],
+            })
+            accuracy_history = pd.DataFrame({
+                "Epoch": epochs,
+                "Training": training_history["accuracy"],
+                "Validation": training_history["val_accuracy"],
+            })
             st.caption(
                 f"Recorded training history: {len(epochs)} epochs. "
                 f"Best validation accuracy: {max(training_history['val_accuracy']):.2%} "
@@ -422,11 +593,7 @@ elif nav_choice == "📊 Model Performance":
             )
             st.markdown("**Cross-entropy loss**")
             st.line_chart(
-                {
-                    "Epoch": epochs,
-                    "Training": training_history["loss"],
-                    "Validation": training_history["val_loss"],
-                },
+                loss_history,
                 x="Epoch",
                 y=["Training", "Validation"],
                 x_label="Epoch",
@@ -435,11 +602,7 @@ elif nav_choice == "📊 Model Performance":
             )
             st.markdown("**Accuracy**")
             st.line_chart(
-                {
-                    "Epoch": epochs,
-                    "Training": training_history["accuracy"],
-                    "Validation": training_history["val_accuracy"],
-                },
+                accuracy_history,
                 x="Epoch",
                 y=["Training", "Validation"],
                 x_label="Epoch",
@@ -451,29 +614,69 @@ elif nav_choice == "📊 Model Performance":
 
     with tab2:
         st.subheader("Confusion Matrix")
-        cm_img = FIGURES_DIR / "confusion_matrix.png"
-        cm_norm_img = FIGURES_DIR / "confusion_matrix_normalized.png"
-        
-        c_m1, c_m2 = st.columns(2)
-        with c_m1:
-            if cm_img.exists():
-                st.image(str(cm_img), caption="Raw Sample Counts Confusion Matrix", use_container_width=True)
-            else:
-                st.warning("Confusion matrix plot pending evaluation execution.")
-        with c_m2:
-            if cm_norm_img.exists():
-                st.image(str(cm_norm_img), caption="Normalized Confusion Matrix (Recall)", use_container_width=True)
-            else:
-                st.warning("Normalized confusion matrix pending evaluation execution.")
+        if eval_data:
+            class_labels = eval_data["class_labels"]
+            matrix = eval_data["confusion_matrix"]
+            st.caption("Rows are actual classes; columns are model-predicted classes.")
+            st.dataframe([
+                {
+                    "Actual / Predicted": actual_label,
+                    **{
+                        predicted_label: int(matrix[row_index][column_index])
+                        for column_index, predicted_label in enumerate(class_labels)
+                    },
+                }
+                for row_index, actual_label in enumerate(class_labels)
+            ], hide_index=True, width="stretch")
+            st.subheader("Normalized confusion matrix")
+            st.dataframe([
+                {
+                    "Actual / Predicted": actual_label,
+                    **{
+                        predicted_label: (
+                            f"{matrix[row_index][column_index] / sum(matrix[row_index]):.1%}"
+                            if sum(matrix[row_index]) else "0.0%"
+                        )
+                        for column_index, predicted_label in enumerate(class_labels)
+                    },
+                }
+                for row_index, actual_label in enumerate(class_labels)
+            ], hide_index=True, width="stretch")
+        else:
+            st.info("The confusion matrix will appear after automatic test evaluation succeeds.")
 
     with tab3:
         st.subheader("Per-Class Precision, Recall, and F1-Score")
-        per_class_img = FIGURES_DIR / "per_class_metrics.png"
-        if per_class_img.exists():
-            st.image(str(per_class_img), caption="Per-Class Performance Breakdown", use_container_width=True)
-
         if eval_data and "per_class" in eval_data:
-            st.table(eval_data["per_class"])
+            per_class = eval_data["per_class"]
+            per_class_frame = pd.DataFrame([
+                {
+                    "Class": class_name,
+                    "Precision": scores["precision"],
+                    "Recall": scores["recall"],
+                    "F1-score": scores["f1_score"],
+                }
+                for class_name, scores in per_class.items()
+            ])
+            st.bar_chart(
+                per_class_frame,
+                x="Class",
+                y=["Precision", "Recall", "F1-score"],
+                y_label="Score",
+                width="stretch",
+            )
+            st.dataframe([
+                {
+                    "Class": class_name,
+                    "Precision": f"{scores['precision']:.2%}",
+                    "Recall": f"{scores['recall']:.2%}",
+                    "F1-score": f"{scores['f1_score']:.2%}",
+                    "Support": scores["support"],
+                }
+                for class_name, scores in per_class.items()
+            ], hide_index=True, width="stretch")
+        else:
+            st.info("Per-class metrics will appear after automatic test evaluation succeeds.")
 
     with tab4:
         st.subheader("Empirical Research Experiments")
