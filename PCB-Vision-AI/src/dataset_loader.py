@@ -174,10 +174,18 @@ class DeepPCBDatasetLoader:
             logger.warning("Raw dataset directory does not exist: %s", self.raw_dir)
             return samples
 
+        image_index = {
+            image_path.name: image_path
+            for image_path in self.raw_dir.rglob("*")
+            if image_path.is_file() and image_path.suffix.lower() in {".jpg", ".jpeg", ".png", ".bmp"}
+        }
+
         # Locate all annotation .txt files
         txt_files = list(self.raw_dir.rglob("*.txt"))
-        # Exclude list files like trainval.txt, test.txt if present
-        annotation_files = [f for f in txt_files if not f.name.endswith(("val.txt", "train.txt", "test.txt", "README.txt", "classes.txt"))]
+        annotation_files = [
+            f for f in txt_files
+            if f.name.lower() not in {"trainval.txt", "train.txt", "test.txt", "readme.txt", "classes.txt"}
+        ]
 
         for annot_file in annotation_files:
             parent_dir = annot_file.parent
@@ -192,23 +200,13 @@ class DeepPCBDatasetLoader:
                 parent_dir / f"{base_name}.jpg",
                 parent_dir / f"{base_name}.png",
             ]
-            test_img = next((c for c in candidate_tests if c.is_file()), None)
-            if test_img is None:
-                test_matches = list(self.raw_dir.rglob(f"{clean_base}_test.jpg"))
-                if not test_matches:
-                    test_matches = list(self.raw_dir.rglob(f"{clean_base}_test.png"))
-                test_img = test_matches[0] if test_matches else None
+            test_img = next((image_index.get(c.name) for c in candidate_tests if c.name in image_index), None)
 
             candidate_temps = [
                 parent_dir / f"{clean_base}_temp.jpg",
                 parent_dir / f"{clean_base}_temp.png",
             ]
-            temp_img = next((c for c in candidate_temps if c.is_file()), None)
-            if temp_img is None:
-                temp_matches = list(self.raw_dir.rglob(f"{clean_base}_temp.jpg"))
-                if not temp_matches:
-                    temp_matches = list(self.raw_dir.rglob(f"{clean_base}_temp.png"))
-                temp_img = temp_matches[0] if temp_matches else None
+            temp_img = next((image_index.get(c.name) for c in candidate_temps if c.name in image_index), None)
 
             if test_img is None:
                 logger.warning("Missing tested image for annotation: %s", annot_file)

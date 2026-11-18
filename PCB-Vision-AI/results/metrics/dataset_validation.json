@@ -1,0 +1,26 @@
+{
+  "total_images": 1500,
+  "valid_images": 1500,
+  "total_defect_boxes": 10013,
+  "class_distribution": {
+    "Open Circuit": 1942,
+    "Short Circuit": 1506,
+    "Mouse Bite": 1965,
+    "Spur": 1625,
+    "Pinhole": 1501,
+    "Spurious Copper": 1474,
+    "Normal": 0
+  },
+  "missing_templates": 0,
+  "missing_annotations_or_empty": 0,
+  "mean_box_width": 38.92859282932188,
+  "mean_box_height": 35.67212623589334,
+  "min_box_size": [
+    18,
+    19
+  ],
+  "max_box_size": [
+    173,
+    152
+  ]
+}

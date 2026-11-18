@@ -228,157 +228,85 @@ if nav_choice == "🏠 Home / Dashboard":
 # ==============================================================================
 elif nav_choice == "🔬 PCB Image Inspection":
     st.markdown('<div class="main-header">PCB Visual Defect Inspection</div>', unsafe_allow_html=True)
-    st.markdown('<div class="sub-header">Upload a PCB patch or full board image for real-time defect classification and visual defect localization.</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sub-header">Upload a PCB photo to classify a patch or automatically scan a full board. Full-board boxes are coarse sliding-window regions, not precision detector boxes.</div>', unsafe_allow_html=True)
 
-    mode = st.radio(
-        "Select Inspection Mode",
-        ["🔍 Single Patch Classification (128×128)", "📐 Full Board Sliding-Window Localization (640×640)"],
-        horizontal=True
+    uploaded_file = st.file_uploader(
+        "Upload a PCB image",
+        type=["png", "jpg", "jpeg", "bmp"],
+        key="pcb_image"
     )
-
-    st.markdown("---")
-
-    if mode == "🔍 Single Patch Classification (128×128)":
-        col_input, col_result = st.columns([1, 1.2])
-
-        with col_input:
-            st.subheader("1. Input Image Patch")
-            uploaded_file = st.file_uploader("Upload Patch Image (PNG, JPG, BMP)", type=["jpg", "jpeg", "png", "bmp"])
-            
-            # Preset sample generator if no upload
-            use_sample = st.checkbox("Or use built-in synthetic defect sample", value=(uploaded_file is None))
-
-            img_to_process = None
-            if uploaded_file is not None:
-                file_bytes = np.asarray(bytearray(uploaded_file.read()), dtype=np.uint8)
-                img_to_process = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
-                st.image(img_to_process, caption="Uploaded Image Patch", use_container_width=True)
-            elif use_sample:
-                # Generate synthetic test patch with an Open Circuit
-                sample_patch = np.full((128, 128), 240, dtype=np.uint8)
-                cv2.line(sample_patch, (10, 64), (50, 64), 30, 10)  # Left trace
-                cv2.line(sample_patch, (78, 64), (118, 64), 30, 10) # Right trace (Break in middle)
-                # Add solder pad
-                cv2.circle(sample_patch, (30, 30), 12, 30, -1)
-                img_to_process = sample_patch
-                st.image(img_to_process, caption="Synthetic Demo Patch (Open Circuit Break)", use_container_width=True)
-
-        with col_result:
-            st.subheader("2. Model Classification Result")
-            if img_to_process is not None:
-                if not classifier.is_loaded():
-                    st.error("No compatible trained .keras model is loaded. Run `python project_cli.py train` before patch inference.")
-                else:
-                    with st.spinner("Executing CNN Forward Pass..."):
-                        pred = classifier.predict_patch(img_to_process)
-
-                    pred_class = pred["predicted_class"]
-                    conf = pred["confidence"]
-                    probs = pred["probabilities"]
-
-                    is_normal = (pred_class == "Normal")
-                    if is_normal:
-                        st.success(f"**Predicted Status:** {pred_class} (Defect-Free) — Confidence: {conf * 100:.2f}%")
-                    else:
-                        st.error(f"**Defect Detected:** {pred_class} — Confidence: {conf * 100:.2f}%")
-
-                    st.markdown("#### Class Probability Distribution")
-                    for cls_name, prob in probs.items():
-                        c_col1, c_col2 = st.columns([1.5, 3])
-                        with c_col1:
-                            st.caption(f"**{cls_name}**")
-                        with c_col2:
-                            st.progress(float(prob), text=f"{prob * 100:.1f}%")
-
-                    with st.expander("Detailed Prediction Diagnostics"):
-                        st.json({
-                            "predicted_label": pred_class,
-                            "class_index": pred["class_index"],
-                            "confidence_score": float(conf),
-                            "model_loaded": classifier.is_loaded()
-                        })
-            else:
-                st.info("Upload an image patch to view CNN predictions.")
-
+    if uploaded_file is None:
+        st.info("Choose a PCB image to see the image preview and prediction.")
     else:
-        # Full Board Sliding-Window Localization
-        st.subheader("📐 Full Board Scanning & Defect Localization")
-        st.write(
-            "The sliding-window inspector tiles the full PCB image into overlapping 128×128 patches, "
-            "passes them in parallel batches through the CNN, filters non-normal predictions, and consolidates "
-            "overlapping detections using **Non-Maximum Suppression (NMS)**."
-        )
-
-        col_cfg, col_view = st.columns([1, 2])
-        with col_cfg:
-            st.markdown("#### Inspection Settings")
-            stride = st.slider("Window Stride (pixels)", min_value=16, max_value=64, value=48, step=8,
-                               help="Smaller stride increases localization resolution at higher computational cost.")
-            conf_thresh = st.slider("Confidence Threshold", min_value=0.50, max_value=0.95, value=0.70, step=0.05,
-                                    help="Minimum probability required to flag a suspicious patch.")
-            iou_thresh = st.slider("NMS IoU Overlap Threshold", min_value=0.10, max_value=0.60, value=0.30, step=0.05,
-                                   help="Suppresses candidate boxes overlapping more than this threshold.")
-
-            full_file = st.file_uploader("Upload Full PCB Image (640×640)", type=["jpg", "png"], key="full_pcb")
-            use_synthetic_board = st.checkbox("Use Demo Benchmark Board", value=(full_file is None))
-
-        with col_view:
-            target_board = None
-            if full_file is not None:
-                f_bytes = np.asarray(bytearray(full_file.read()), dtype=np.uint8)
-                target_board = cv2.imdecode(f_bytes, cv2.IMREAD_COLOR)
-            elif use_synthetic_board:
-                # Generate sample 640x640 board
-                board = np.full((640, 640), 240, dtype=np.uint8)
-                # Traces
-                cv2.line(board, (30, 150), (610, 150), 30, 10)
-                # Defect 1: Open circuit cut
-                cv2.rectangle(board, (280, 142), (310, 158), 240, -1)
-                # Defect 2: Spur
-                cv2.line(board, (30, 300), (610, 300), 30, 10)
-                cv2.line(board, (420, 300), (435, 275), 30, 6)
-                # Defect 3: Spurious copper
-                cv2.circle(board, (180, 450), 12, 30, -1)
-                target_board = cv2.cvtColor(board, cv2.COLOR_GRAY2BGR)
-
-            if target_board is not None:
-                st.image(target_board, caption="Input PCB Inspection Target", use_container_width=True)
-
-                if st.button("🚀 Run Full Board Inspection Scan", type="primary"):
-                    if not classifier.is_loaded():
-                        st.error("No compatible trained .keras model is loaded. Run `python project_cli.py train` before full-board inspection.")
+        try:
+            uploaded_image = Image.open(io.BytesIO(uploaded_file.getvalue()))
+            uploaded_image.load()
+            uploaded_rgb = np.asarray(uploaded_image.convert("RGB"))
+            st.image(uploaded_image, caption=uploaded_file.name, use_container_width=True)
+        except (OSError, ValueError) as exc:
+            st.error(f"That file could not be decoded as an image: {exc}")
+        else:
+            if not classifier.is_loaded():
+                st.error(
+                    "The trained DeepPCB model is not installed yet. Run the GPU training notebook, "
+                    "then place its .keras checkpoint and matching .metadata.json in the project's models folder."
+                )
+            else:
+                try:
+                    height, width = uploaded_rgb.shape[:2]
+                    if height <= 128 and width <= 128:
+                        prediction = classifier.predict_patch(uploaded_rgb)
+                        if prediction["predicted_class"] == "Normal":
+                            st.success(
+                                f"**Prediction: Normal** — confidence {prediction['confidence']:.1%}"
+                            )
+                        else:
+                            st.warning(
+                                f"**Defect: {prediction['predicted_class']}** — "
+                                f"confidence {prediction['confidence']:.1%}"
+                            )
                     else:
+                        board_bgr = cv2.cvtColor(uploaded_rgb, cv2.COLOR_RGB2BGR)
                         inspector = SlidingWindowInspector(classifier.model)
-                        inspector.config.iou_nms_threshold = iou_thresh
-
-                        with st.spinner("Scanning PCB board with sliding window and NMS..."):
-                            results = inspector.inspect_image(
-                                target_board, stride=stride, conf_threshold=conf_thresh
+                        with st.spinner("Scanning image with the trained DeepPCB model..."):
+                            results = inspector.inspect_image(board_bgr)
+                        if results.get("error"):
+                            st.warning(results["error"])
+                        elif results["detections"]:
+                            st.success(
+                                f"Found {len(results['detections'])} candidate defect regions "
+                                f"across {results['total_windows_scanned']} scanned windows."
                             )
-
-                        st.success(f"Scan complete: {results['total_windows_scanned']} patches evaluated. {len(results['detections'])} defects localized.")
-                        st.image(results["annotated_image"], caption="Annotated Inspection Result", use_container_width=True)
-
-                        if results["detections"]:
-                            st.markdown("#### Detected Defects Summary")
-                            det_table = [
+                            st.image(
+                                results["annotated_image"],
+                                caption="Coarse sliding-window localization",
+                                channels="BGR",
+                                use_container_width=True
+                            )
+                            st.dataframe([
                                 {
-                                    "Defect Category": d["class_name"],
-                                    "Confidence": f"{d['confidence'] * 100:.1f}%",
-                                    "Bounding Box (x1, y1, x2, y2)": str(d["box"])
+                                    "Defect": detection["class_name"],
+                                    "Confidence": f"{detection['confidence']:.1%}",
+                                    "Window coordinates": detection["box"],
                                 }
-                                for d in results["detections"]
-                            ]
-                            st.table(det_table)
-
-                        is_success, buffer = cv2.imencode(".png", results["annotated_image"])
-                        if is_success:
-                            st.download_button(
-                                label="📥 Download Annotated Inspection Image",
-                                data=buffer.tobytes(),
-                                file_name="pcb_inspection_annotated.png",
-                                mime="image/png"
+                                for detection in results["detections"]
+                            ], use_container_width=True)
+                            encoded, png = cv2.imencode(".png", results["annotated_image"])
+                            if encoded:
+                                st.download_button(
+                                    "Download annotated image",
+                                    data=png.tobytes(),
+                                    file_name="pcb_inspection_annotated.png",
+                                    mime="image/png"
+                                )
+                        else:
+                            st.info(
+                                f"No defect candidate exceeded the model threshold in "
+                                f"{results['total_windows_scanned']} scanned windows. "
+                                "This is not a guarantee that the board is defect-free."
                             )
+                except (RuntimeError, ValueError, cv2.error) as exc:
+                    st.error(f"PCB inspection could not be completed: {exc}")
 
 
 # ==============================================================================

@@ -75,6 +75,9 @@ def command_preprocess(args):
 def command_train(args):
     if not TF_AVAILABLE:
         raise SystemExit("TensorFlow is unavailable; install requirements.txt before training.")
+    import tensorflow as tf
+
+    tf.keras.utils.set_random_seed(DATASET_CONFIG.random_seed)
     processed_path = Path(args.processed)
     if not processed_path.exists():
         raise SystemExit("Processed dataset not found. Run `python project_cli.py preprocess` first.")
@@ -94,9 +97,21 @@ def command_train(args):
         data["X_train"], data["y_train"],
         data["X_val"], data["y_val"],
         save_path=Path(args.save),
+        class_weights=data.get("class_weights"),
         epochs=args.epochs,
         batch_size=args.batch_size,
     )
+    metadata_path = Path(args.save).with_suffix(".metadata.json")
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    metadata.update({
+        "training_dataset": "DeepPCB",
+        "split_method": "official DeepPCB trainval/test lists; validation held out from trainval",
+        "train_board_count": len(data.get("train_sample_ids", [])),
+        "validation_board_count": len(data.get("val_sample_ids", [])),
+        "test_board_count": len(data.get("test_sample_ids", [])),
+        "class_weights": {str(key): value for key, value in data.get("class_weights", {}).items()},
+    })
+    metadata_path.write_text(json.dumps(metadata, indent=2), encoding="utf-8")
     print(json.dumps({"model": str(args.save), "elapsed_seconds": elapsed, "epochs_trained": len(history["loss"])}, indent=2))
     return 0
 

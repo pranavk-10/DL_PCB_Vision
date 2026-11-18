@@ -50,6 +50,38 @@ def test_anti_leakage_split():
     assert len(val_ids.intersection(test_ids)) == 0, "Leakage detected between val and test!"
 
 
+def test_official_deeppcb_test_split_is_preserved():
+    samples = [
+        PCBSample(
+            sample_id=f"image_{i:04d}",
+            test_image_path=Path(f"image_{i:04d}_test.jpg"),
+            template_image_path=Path(f"image_{i:04d}_temp.jpg"),
+            annotation_path=Path(f"image_{i:04d}.txt"),
+            boxes=[]
+        )
+        for i in range(13)
+    ]
+    trainval_ids = {f"image_{i:04d}" for i in range(10)}
+    official_test_ids = {f"image_{i:04d}" for i in range(10, 13)}
+
+    train_s, val_s, test_s = split_pcb_samples(
+        samples,
+        official_trainval_ids=trainval_ids,
+        official_test_ids=official_test_ids,
+        seed=42
+    )
+
+    train_ids = {sample.sample_id for sample in train_s}
+    val_ids = {sample.sample_id for sample in val_s}
+    test_ids = {sample.sample_id for sample in test_s}
+    assert len(train_s) == 8
+    assert len(val_s) == 2
+    assert test_ids == official_test_ids
+    assert train_ids.isdisjoint(val_ids)
+    assert train_ids.isdisjoint(test_ids)
+    assert val_ids.isdisjoint(test_ids)
+
+
 def test_defect_patch_extraction():
     """Verifies that patch extraction returns normalized (128, 128, 1) tensor."""
     dummy_image = np.full((640, 640), 200, dtype=np.uint8)

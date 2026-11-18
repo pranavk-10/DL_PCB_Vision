@@ -37,7 +37,9 @@ def split_pcb_samples(
     train_ratio: float = 0.70,
     val_ratio: float = 0.15,
     test_ratio: float = 0.15,
-    seed: int = 42
+    seed: int = 42,
+    official_trainval_ids: Optional[set] = None,
+    official_test_ids: Optional[set] = None
 ) -> Tuple[List[PCBSample], List[PCBSample], List[PCBSample]]:
     """
     CRITICAL ANTI-LEAKAGE REQUIREMENT:
@@ -45,6 +47,38 @@ def split_pcb_samples(
     Ensures no patches from the same PCB board or pair exist across train/val/test splits.
     """
     assert abs((train_ratio + val_ratio + test_ratio) - 1.0) < 1e-5, "Split ratios must sum to 1.0"
+
+    if official_trainval_ids is not None or official_test_ids is not None:
+        if official_trainval_ids is None or official_test_ids is None:
+            raise ValueError("Both official DeepPCB trainval and test IDs must be provided.")
+        if official_trainval_ids.intersection(official_test_ids):
+            raise ValueError("Official DeepPCB trainval and test splits overlap.")
+
+        samples_by_id = {sample.sample_id: sample for sample in samples}
+        if len(samples_by_id) != len(samples):
+            raise ValueError("Duplicate sample IDs prevent reliable official split assignment.")
+        expected_ids = official_trainval_ids | official_test_ids
+        missing_ids = expected_ids - samples_by_id.keys()
+        unexpected_ids = samples_by_id.keys() - expected_ids
+        if missing_ids or unexpected_ids:
+            raise ValueError(
+                f"Dataset does not match official split lists: "
+                f"{len(missing_ids)} missing and {len(unexpected_ids)} unexpected samples."
+            )
+
+        trainval_samples = [samples_by_id[sample_id] for sample_id in sorted(official_trainval_ids)]
+        test_samples = [samples_by_id[sample_id] for sample_id in sorted(official_test_ids)]
+        rng = np.random.RandomState(seed)
+        shuffled = rng.permutation(len(trainval_samples))
+        val_count = max(1, int(round(len(trainval_samples) * val_ratio)))
+        val_indices = set(shuffled[:val_count].tolist())
+        val_samples = [sample for index, sample in enumerate(trainval_samples) if index in val_indices]
+        train_samples = [sample for index, sample in enumerate(trainval_samples) if index not in val_indices]
+        logger.info(
+            "Official DeepPCB split: Train=%d, Val=%d, Test=%d",
+            len(train_samples), len(val_samples), len(test_samples)
+        )
+        return train_samples, val_samples, test_samples
     
     rng = np.random.RandomState(seed)
     shuffled_indices = rng.permutation(len(samples))
@@ -309,12 +343,31 @@ class PCBDataPipeline:
         if not samples:
             raise ValueError(f"No PCB samples found in {self.dataset_config.raw_dir}")
 
+        official_trainval_path = self.dataset_config.raw_dir / "PCBData" / "trainval.txt"
+        official_test_path = self.dataset_config.raw_dir / "PCBData" / "test.txt"
+        official_trainval_ids = None
+        official_test_ids = None
+        if official_trainval_path.is_file() and official_test_path.is_file():
+            def read_split_ids(split_path: Path) -> set:
+                ids = set()
+                with split_path.open("r", encoding="utf-8") as split_file:
+                    for line in split_file:
+                        fields = line.strip().split()
+                        if len(fields) >= 2:
+                            ids.add(Path(fields[1]).stem)
+                return ids
+
+            official_trainval_ids = read_split_ids(official_trainval_path)
+            official_test_ids = read_split_ids(official_test_path)
+
         train_s, val_s, test_s = split_pcb_samples(
             samples,
             train_ratio=self.dataset_config.train_split,
             val_ratio=self.dataset_config.val_split,
             test_ratio=self.dataset_config.test_split,
-            seed=self.dataset_config.random_seed
+            seed=self.dataset_config.random_seed,
+            official_trainval_ids=official_trainval_ids,
+            official_test_ids=official_test_ids
         )
 
         logger.info("Extracting training patches (with augmentation)...")
@@ -365,6 +418,10 @@ class PCBDataPipeline:
                 X_val=X_val, y_val=y_val,
                 X_test=X_test, y_test=y_test,
                 class_labels=np.asarray(self.dataset_config.class_labels, dtype=np.str_),
+                class_weights=np.asarray(
+                    [class_weight_dict.get(index, 0.0) for index in range(len(self.dataset_config.class_labels))],
+                    dtype=np.float32
+                ),
                 train_sample_ids=np.asarray([s.sample_id for s in train_s], dtype=np.str_),
                 val_sample_ids=np.asarray([s.sample_id for s in val_s], dtype=np.str_),
                 test_sample_ids=np.asarray([s.sample_id for s in test_s], dtype=np.str_),
@@ -390,6 +447,12 @@ class PCBDataPipeline:
             }
             if "class_labels" in data:
                 result["class_labels"] = data["class_labels"].tolist()
+            if "class_weights" in data:
+                result["class_weights"] = {
+                    index: float(weight)
+                    for index, weight in enumerate(data["class_weights"])
+                    if weight > 0
+                }
             for key in ("train_sample_ids", "val_sample_ids", "test_sample_ids"):
                 if key in data:
                     result[key] = data[key].tolist()

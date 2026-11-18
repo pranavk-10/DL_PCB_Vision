@@ -8,6 +8,7 @@ Provides:
 """
 
 import logging
+import json
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Tuple, Union
 import numpy as np
@@ -77,7 +78,15 @@ class PCBDefectClassifier:
         allow_heuristic_fallback: bool = False
     ):
         self.class_labels = class_labels
-        self.model_path = Path(model_path) if model_path else MODEL_CONFIG.cnn_model_path
+        if model_path is None:
+            candidates = [MODEL_CONFIG.cnn_model_path]
+            candidates.extend(sorted(
+                path for path in MODEL_CONFIG.cnn_model_path.parent.glob("*.keras")
+                if path != MODEL_CONFIG.cnn_model_path
+            ))
+            self.model_path = next((path for path in candidates if path.is_file()), candidates[0])
+        else:
+            self.model_path = Path(model_path)
         self.model = None
         self.allow_heuristic_fallback = allow_heuristic_fallback
         self._load_model()
@@ -85,7 +94,7 @@ class PCBDefectClassifier:
     def _load_model(self) -> None:
         """Loads trained Keras model from disk."""
         if not TF_AVAILABLE:
-            logger.warning("TensorFlow is not available. Running in mock/fallback inference mode.")
+            logger.warning("TensorFlow is unavailable; trained model inference cannot run.")
             return
 
         if self.model_path.exists():
@@ -97,6 +106,16 @@ class PCBDefectClassifier:
                     raise ValueError(f"Incompatible input shape {input_shape}; expected (None, 128, 128, 1)")
                 if output_shape[1] != len(self.class_labels):
                     raise ValueError(f"Incompatible output shape {output_shape}; expected {len(self.class_labels)} classes")
+                metadata_path = self.model_path.with_suffix(".metadata.json")
+                if metadata_path.is_file():
+                    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+                    checkpoint_classes = metadata.get("class_names")
+                    if checkpoint_classes and checkpoint_classes != self.class_labels:
+                        raise ValueError(
+                            "Checkpoint class ordering does not match configured class labels."
+                        )
+                    if metadata.get("normalization") not in (None, "grayscale_uint8_scaled_to_[0,1]"):
+                        raise ValueError("Checkpoint preprocessing metadata is incompatible.")
                 self.model = loaded_model
                 logger.info("Successfully loaded CNN model from: %s", self.model_path)
             except Exception as e:
