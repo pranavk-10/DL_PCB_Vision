@@ -57,3 +57,10 @@ models/*.h5
 # Documents & PDFs (user strictly requested not to track PDFs in git)
 *.pdf
 **/*.pdf
+
+# PDF Generation Scripts (Strictly excluded from git)
+*pdf*.py
+*report*.py
+build_strict_10page_report.py
+generate_pdf_report.py
+generate_viva_pdf.py
