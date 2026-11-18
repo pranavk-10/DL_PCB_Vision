@@ -20,9 +20,9 @@ def test_preprocess_input_patch():
     assert 0.0 <= tensor.min() and tensor.max() <= 1.0
 
 
-def test_classifier_requires_trained_model_by_default():
+def test_classifier_requires_trained_model_by_default(tmp_path):
     """Prevents untrained heuristics from being presented as trained CNN predictions."""
-    classifier = PCBDefectClassifier()
+    classifier = PCBDefectClassifier(model_path=tmp_path / "missing.keras")
     dummy_patch = np.random.randint(0, 255, (128, 128), dtype=np.uint8)
 
     with pytest.raises(RuntimeError, match="No compatible trained model"):

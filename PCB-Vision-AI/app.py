@@ -12,6 +12,8 @@ Includes:
 import sys
 import io
 import json
+import base64
+import html
 from pathlib import Path
 import numpy as np
 import cv2
@@ -42,6 +44,21 @@ from config.config import (
 from src.inference import PCBDefectClassifier, preprocess_input_patch
 from src.localization import SlidingWindowInspector
 from src.model import TF_AVAILABLE
+
+
+def display_inline_image(image_bytes: bytes, mime_type: str, caption: str) -> None:
+    """Render an image without Streamlit's media-file endpoint."""
+    encoded_image = base64.b64encode(image_bytes).decode("ascii")
+    safe_caption = html.escape(caption, quote=True)
+    st.markdown(
+        f'<figure style="margin:0">'
+        f'<img src="data:{mime_type};base64,{encoded_image}" '
+        f'alt="{safe_caption}" style="display:block;width:100%;height:auto;object-fit:contain">'
+        f'<figcaption style="text-align:center;margin-top:.5rem">{safe_caption}</figcaption>'
+        f'</figure>',
+        unsafe_allow_html=True
+    )
+
 
 # Professional Industrial Inspection Theme CSS
 st.markdown("""
@@ -242,7 +259,9 @@ elif nav_choice == "🔬 PCB Image Inspection":
             uploaded_image = Image.open(io.BytesIO(uploaded_file.getvalue()))
             uploaded_image.load()
             uploaded_rgb = np.asarray(uploaded_image.convert("RGB"))
-            st.image(uploaded_image, caption=uploaded_file.name, use_container_width=True)
+            preview_buffer = io.BytesIO()
+            uploaded_image.convert("RGB").save(preview_buffer, format="PNG")
+            display_inline_image(preview_buffer.getvalue(), "image/png", uploaded_file.name)
         except (OSError, ValueError) as exc:
             st.error(f"That file could not be decoded as an image: {exc}")
         else:
@@ -278,28 +297,56 @@ elif nav_choice == "🔬 PCB Image Inspection":
                                 f"Found {len(results['detections'])} candidate defect regions "
                                 f"across {results['total_windows_scanned']} scanned windows."
                             )
-                            st.image(
-                                results["annotated_image"],
-                                caption="Coarse sliding-window localization",
-                                channels="BGR",
-                                use_container_width=True
-                            )
-                            st.dataframe([
-                                {
-                                    "Defect": detection["class_name"],
-                                    "Confidence": f"{detection['confidence']:.1%}",
-                                    "Window coordinates": detection["box"],
-                                }
-                                for detection in results["detections"]
-                            ], use_container_width=True)
                             encoded, png = cv2.imencode(".png", results["annotated_image"])
                             if encoded:
-                                st.download_button(
-                                    "Download annotated image",
-                                    data=png.tobytes(),
-                                    file_name="pcb_inspection_annotated.png",
-                                    mime="image/png"
+                                annotated_png = png.tobytes()
+                                display_inline_image(
+                                    annotated_png,
+                                    "image/png",
+                                    "Annotated PCB — sliding-window regions"
                                 )
+                                download_data = base64.b64encode(annotated_png).decode("ascii")
+                                st.markdown(
+                                    f'<a download="pcb_inspection_annotated.png" '
+                                    f'href="data:image/png;base64,{download_data}">'
+                                    'Download annotated image</a>',
+                                    unsafe_allow_html=True
+                                )
+
+                            detections_by_class = {}
+                            for detection in results["detections"]:
+                                class_idx = detection["class_idx"]
+                                entry = detections_by_class.setdefault(class_idx, {
+                                    "Defect": detection["class_name"],
+                                    "Best window confidence": detection["confidence"],
+                                    "Candidate regions": 0,
+                                })
+                                entry["Best window confidence"] = max(
+                                    entry["Best window confidence"], detection["confidence"]
+                                )
+                                entry["Candidate regions"] += 1
+                            st.subheader("Defect classes and confidence")
+                            st.dataframe([
+                                {
+                                    "Defect": item["Defect"],
+                                    "Best window confidence": f"{item['Best window confidence']:.1%}",
+                                    "Candidate regions": item["Candidate regions"],
+                                }
+                                for item in detections_by_class.values()
+                            ], hide_index=True, use_container_width=True)
+                            with st.expander("Show candidate window pixel coordinates"):
+                                st.caption(
+                                    "Coordinates are image pixels in (x1, y1, x2, y2) format. "
+                                    "Each confidence is the CNN score for that 128×128 window."
+                                )
+                                st.dataframe([
+                                    {
+                                        "Defect": detection["class_name"],
+                                        "Confidence": f"{detection['confidence']:.1%}",
+                                        "Window pixels (x1, y1, x2, y2)": detection["box"],
+                                    }
+                                    for detection in results["detections"]
+                                ], hide_index=True, use_container_width=True)
                         else:
                             st.info(
                                 f"No defect candidate exceeded the model threshold in "
