@@ -27,7 +27,8 @@ def test_map_raw_id_to_target_index():
     assert map_raw_id_to_target_index(4) == 3  # Spur
     assert map_raw_id_to_target_index(5) == 5  # Spurious Copper
     assert map_raw_id_to_target_index(6) == 4  # Pinhole
-    assert map_raw_id_to_target_index(99) == 6 # Fallback to Normal
+    with pytest.raises(ValueError, match="Unknown DeepPCB class ID"):
+        map_raw_id_to_target_index(99)
 
 
 def test_parse_annotation_file_valid_and_comma_formats():
@@ -99,3 +100,16 @@ def test_synthetic_benchmark_creation_and_loading():
         summary = loader.get_dataset_summary(samples)
         assert summary["total_images"] == 5
         assert summary["total_defect_boxes"] > 0
+
+
+def test_unknown_annotation_ids_are_not_treated_as_normal():
+    parser = DeepPCBParser()
+    with tempfile.NamedTemporaryFile("w+", delete=False, suffix=".txt") as tf:
+        tf.write("10 10 30 30 99\n")
+        temp_path = Path(tf.name)
+
+    try:
+        boxes = parser.parse_annotation_file(temp_path, img_width=640, img_height=640)
+        assert boxes == []
+    finally:
+        temp_path.unlink()

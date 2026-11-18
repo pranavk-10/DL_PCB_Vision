@@ -193,50 +193,55 @@ pip install -r requirements.txt
 
 ---
 
-## 🚀 Workflow Execution Guide
+## 🚀 Workflow Execution Guide (Windows CMD)
 
-### Step 1: Dataset Preparation
-To populate the raw dataset directory with DeepPCB benchmark samples:
-```powershell
-python -c "from src.dataset_loader import create_synthetic_pcb_benchmark; create_synthetic_pcb_benchmark('data/raw', num_pairs=60)"
-```
-*(Or place the real DeepPCB `PCBData` directory inside `data/raw/`).*
-
-### Step 2: Preprocessing & Anti-Leakage Splitting
-Extract $128 \times 128$ defect and normal patches, execute image-level anti-leakage splitting, and save `.npz` arrays:
-```powershell
-python -c "from src.preprocessing import PCBDataPipeline; pipeline = PCBDataPipeline(); pipeline.run_full_pipeline()"
+### Setup
+```cmd
+cd C:\Users\hp\Desktop\Projects\DL\PCB-Vision-AI
+python -m venv venv
+venv\Scripts\activate.bat
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
 ```
 
-### Step 3: Model Training
-Train the Custom CNN from scratch with callbacks:
-```powershell
-python -c "from src.preprocessing import PCBDataPipeline; from src.model import build_custom_cnn; from src.train import train_model; from config.config import DATA_PROCESSED_DIR; data = PCBDataPipeline.load_processed_dataset(DATA_PROCESSED_DIR / 'pcb_dataset_processed.npz'); model = build_custom_cnn(); train_model(model, data['X_train'], data['y_train'], data['X_val'], data['y_val'], epochs=15)"
+### Step 1: Download Real DeepPCB (explicit)
+```cmd
+python project_cli.py download --target data\raw\DeepPCB
+```
+For testing only, generate synthetic data with a separate explicit command:
+```cmd
+python project_cli.py synthetic --target data\raw\synthetic --num-pairs 120
+```
+Synthetic data must not be used as real DeepPCB training evidence.
+
+### Step 2: Validate the Dataset
+```cmd
+python project_cli.py validate --raw-dir data\raw\DeepPCB
 ```
 
-### Step 4: Model Evaluation
-Generate confusion matrices, learning curves, and classification reports:
-```powershell
-python -c "from src.preprocessing import PCBDataPipeline; from src.inference import PCBDefectClassifier; from src.evaluate import run_full_evaluation; from config.config import DATA_PROCESSED_DIR; data = PCBDataPipeline.load_processed_dataset(DATA_PROCESSED_DIR / 'pcb_dataset_processed.npz'); clf = PCBDefectClassifier(); probs = clf.model.predict(data['X_test']) if clf.model else [clf.predict_patch(p)['raw_probabilities'] for p in data['X_test']]; run_full_evaluation(data['y_test'], probs)"
+### Step 3: Preprocess with Leakage-Free Splits
+```cmd
+python project_cli.py preprocess --raw-dir data\raw\DeepPCB
 ```
 
-### Step 5: Launching Streamlit Web Dashboard
-Launch the interactive inspection application:
-```powershell
+### Step 4: Train the Custom CNN
+```cmd
+python project_cli.py train --epochs 25 --batch-size 32 --learning-rate 0.001
+```
+
+### Step 5: Evaluate the Untouched Test Split
+```cmd
+python project_cli.py evaluate
+```
+
+### Step 6: Launch the Streamlit Dashboard
+```cmd
 streamlit run app.py
 ```
-Open your web browser at `http://localhost:8501`.
 
-### Step 6: Executing Unit Tests
-Run the comprehensive pytest validation suite:
-```powershell
-pytest tests/ -v
-```
-
-### Step 7: Running Jupyter Notebook
-Launch Jupyter Lab / Notebook to explore the interactive learning notebook:
-```powershell
-jupyter lab notebooks/PCB_Vision_AI_Complete.ipynb
+### Step 7: Run Tests
+```cmd
+venv\Scripts\python.exe -m pytest tests -v
 ```
 
 ---

@@ -59,17 +59,7 @@ class PCBSample:
 
 
 def map_raw_id_to_target_index(raw_id: int) -> int:
-    """
-    Maps raw DeepPCB annotation type IDs (1..6) to zero-indexed model classes (0..6).
-    Raw mapping:
-      1 (open)            -> Index 0 ("Open Circuit")
-      2 (short)           -> Index 1 ("Short Circuit")
-      3 (mousebite)       -> Index 2 ("Mouse Bite")
-      4 (spur)            -> Index 3 ("Spur")
-      5 (copper/spurious) -> Index 5 ("Spurious Copper")
-      6 (pin-hole)        -> Index 4 ("Pinhole")
-      7 or other / normal -> Index 6 ("Normal")
-    """
+    """Maps a validated DeepPCB defect ID (1..6) to the model target index."""
     mapping = {
         1: 0,  # Open Circuit
         2: 1,  # Short Circuit
@@ -78,7 +68,12 @@ def map_raw_id_to_target_index(raw_id: int) -> int:
         5: 5,  # Spurious Copper
         6: 4,  # Pinhole
     }
-    return mapping.get(raw_id, 6)
+    if raw_id not in mapping:
+        raise ValueError(
+            f"Unknown DeepPCB class ID {raw_id}; valid IDs are 1 through 6. "
+            "Normal is an optional generated patch class and is never inferred from an unknown annotation."
+        )
+    return mapping[raw_id]
 
 
 class DeepPCBParser:
@@ -139,7 +134,11 @@ class DeepPCBParser:
                 if (x2 - x1) <= 2 or (y2 - y1) <= 2:
                     continue
 
-                class_name = self.config.raw_class_map.get(raw_type, "Unknown")
+                if raw_type not in self.config.raw_class_map:
+                    logger.warning("Skipping unknown DeepPCB class ID %d in %s (line %d)", raw_type, annotation_path.name, line_idx)
+                    continue
+
+                class_name = self.config.raw_class_map[raw_type]
                 target_idx = map_raw_id_to_target_index(raw_type)
 
                 boxes.append(BoundingBox(
@@ -182,38 +181,61 @@ class DeepPCBDatasetLoader:
 
         for annot_file in annotation_files:
             parent_dir = annot_file.parent
-            base_name = annot_file.stem  # e.g., '00010001' or '00010001_test'
+            base_name = annot_file.stem
             clean_base = base_name.replace("_test", "").replace("_temp", "")
 
-            # Look for test image matching clean_base
             candidate_tests = [
                 parent_dir / f"{clean_base}_test.jpg",
                 parent_dir / f"{clean_base}_test.png",
                 parent_dir / f"{clean_base}.jpg",
                 parent_dir / f"{clean_base}.png",
+                parent_dir / f"{base_name}.jpg",
+                parent_dir / f"{base_name}.png",
             ]
-            test_img = next((c for c in candidate_tests if c.exists()), None)
+            test_img = next((c for c in candidate_tests if c.is_file()), None)
+            if test_img is None:
+                test_matches = list(self.raw_dir.rglob(f"{clean_base}_test.jpg"))
+                if not test_matches:
+                    test_matches = list(self.raw_dir.rglob(f"{clean_base}_test.png"))
+                test_img = test_matches[0] if test_matches else None
 
-            # Look for template image matching clean_base
             candidate_temps = [
                 parent_dir / f"{clean_base}_temp.jpg",
                 parent_dir / f"{clean_base}_temp.png",
             ]
-            temp_img = next((c for c in candidate_temps if c.exists()), None)
+            temp_img = next((c for c in candidate_temps if c.is_file()), None)
+            if temp_img is None:
+                temp_matches = list(self.raw_dir.rglob(f"{clean_base}_temp.jpg"))
+                if not temp_matches:
+                    temp_matches = list(self.raw_dir.rglob(f"{clean_base}_temp.png"))
+                temp_img = temp_matches[0] if temp_matches else None
 
-            if test_img is not None:
-                boxes = self.parser.parse_annotation_file(
-                    annot_file,
-                    img_width=self.config.raw_image_width,
-                    img_height=self.config.raw_image_height
-                )
-                samples.append(PCBSample(
-                    sample_id=clean_base,
-                    test_image_path=test_img,
-                    template_image_path=temp_img,
-                    annotation_path=annot_file,
-                    boxes=boxes
-                ))
+            if test_img is None:
+                logger.warning("Missing tested image for annotation: %s", annot_file)
+                continue
+
+            if cv2 is not None:
+                test_image = cv2.imread(str(test_img), cv2.IMREAD_UNCHANGED)
+                if test_image is None:
+                    logger.warning("Corrupt or unreadable tested image: %s", test_img)
+                    continue
+                img_height, img_width = test_image.shape[:2]
+            else:
+                img_width = self.config.raw_image_width
+                img_height = self.config.raw_image_height
+
+            boxes = self.parser.parse_annotation_file(
+                annot_file,
+                img_width=img_width,
+                img_height=img_height
+            )
+            samples.append(PCBSample(
+                sample_id=clean_base,
+                test_image_path=test_img,
+                template_image_path=temp_img,
+                annotation_path=annot_file,
+                boxes=boxes
+            ))
 
         logger.info("Found %d PCB test samples in %s", len(samples), self.raw_dir)
         return samples
@@ -239,10 +261,18 @@ class DeepPCBDatasetLoader:
                 box_widths.append(box.width)
                 box_heights.append(box.height)
 
+        missing_templates = sum(
+            1 for sample in samples
+            if sample.template_image_path is None or not sample.template_image_path.is_file()
+        )
+        empty_annotations = sum(1 for sample in samples if not sample.boxes)
         summary = {
             "total_images": total_samples,
+            "valid_images": total_samples,
             "total_defect_boxes": total_boxes,
             "class_distribution": class_counts,
+            "missing_templates": missing_templates,
+            "missing_annotations_or_empty": empty_annotations,
             "mean_box_width": float(np.mean(box_widths)) if box_widths else 0.0,
             "mean_box_height": float(np.mean(box_heights)) if box_heights else 0.0,
             "min_box_size": (min(box_widths), min(box_heights)) if box_widths else (0, 0),

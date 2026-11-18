@@ -129,8 +129,8 @@ if classifier.is_loaded():
     st.sidebar.markdown('<span class="status-badge badge-ok">● Trained CNN Loaded</span>', unsafe_allow_html=True)
     st.sidebar.caption(f"Weights: `{classifier.model_path.name}`")
 else:
-    st.sidebar.markdown('<span class="status-badge badge-warn">▲ Heuristic Offline Mode</span>', unsafe_allow_html=True)
-    st.sidebar.caption("Run training to load `.keras` weights.")
+    st.sidebar.markdown('<span class="status-badge badge-warn">▲ No Compatible Model</span>', unsafe_allow_html=True)
+    st.sidebar.caption("Run training or load a valid `.keras` checkpoint.")
 
 st.sidebar.markdown(f"**TensorFlow Available:** `{'Yes' if TF_AVAILABLE else 'No'}`")
 st.sidebar.markdown(f"**Target Classes:** `{len(DATASET_CONFIG.class_labels)}`")
@@ -266,36 +266,37 @@ elif nav_choice == "🔬 PCB Image Inspection":
         with col_result:
             st.subheader("2. Model Classification Result")
             if img_to_process is not None:
-                with st.spinner("Executing CNN Forward Pass..."):
-                    pred = classifier.predict_patch(img_to_process)
-
-                pred_class = pred["predicted_class"]
-                conf = pred["confidence"]
-                probs = pred["probabilities"]
-
-                # Result callout
-                is_normal = (pred_class == "Normal")
-                if is_normal:
-                    st.success(f"**Predicted Status:** {pred_class} (Defect-Free) — Confidence: {conf * 100:.2f}%")
+                if not classifier.is_loaded():
+                    st.error("No compatible trained .keras model is loaded. Run `python project_cli.py train` before patch inference.")
                 else:
-                    st.error(f"**Defect Detected:** {pred_class} — Confidence: {conf * 100:.2f}%")
+                    with st.spinner("Executing CNN Forward Pass..."):
+                        pred = classifier.predict_patch(img_to_process)
 
-                st.markdown("#### Class Probability Distribution")
-                for cls_name, prob in probs.items():
-                    c_col1, c_col2 = st.columns([1.5, 3])
-                    with c_col1:
-                        st.caption(f"**{cls_name}**")
-                    with c_col2:
-                        st.progress(float(prob), text=f"{prob * 100:.1f}%")
+                    pred_class = pred["predicted_class"]
+                    conf = pred["confidence"]
+                    probs = pred["probabilities"]
 
-                # Raw details expander
-                with st.expander("Detailed Prediction Diagnostics"):
-                    st.json({
-                        "predicted_label": pred_class,
-                        "class_index": pred["class_index"],
-                        "confidence_score": float(conf),
-                        "model_loaded": classifier.is_loaded()
-                    })
+                    is_normal = (pred_class == "Normal")
+                    if is_normal:
+                        st.success(f"**Predicted Status:** {pred_class} (Defect-Free) — Confidence: {conf * 100:.2f}%")
+                    else:
+                        st.error(f"**Defect Detected:** {pred_class} — Confidence: {conf * 100:.2f}%")
+
+                    st.markdown("#### Class Probability Distribution")
+                    for cls_name, prob in probs.items():
+                        c_col1, c_col2 = st.columns([1.5, 3])
+                        with c_col1:
+                            st.caption(f"**{cls_name}**")
+                        with c_col2:
+                            st.progress(float(prob), text=f"{prob * 100:.1f}%")
+
+                    with st.expander("Detailed Prediction Diagnostics"):
+                        st.json({
+                            "predicted_label": pred_class,
+                            "class_index": pred["class_index"],
+                            "confidence_score": float(conf),
+                            "model_loaded": classifier.is_loaded()
+                        })
             else:
                 st.info("Upload an image patch to view CNN predictions.")
 
@@ -345,50 +346,39 @@ elif nav_choice == "🔬 PCB Image Inspection":
 
                 if st.button("🚀 Run Full Board Inspection Scan", type="primary"):
                     if not classifier.is_loaded():
-                        st.warning("Model weights file not loaded. Running sliding window with mock heuristic estimator.")
+                        st.error("No compatible trained .keras model is loaded. Run `python project_cli.py train` before full-board inspection.")
+                    else:
+                        inspector = SlidingWindowInspector(classifier.model)
+                        inspector.config.iou_nms_threshold = iou_thresh
 
-                    # Use trained model if available, else instantiate inspector with mock model
-                    class MockKerasModel:
-                        def predict(self, batch, batch_size=64, verbose=0):
-                            res = []
-                            for p in batch:
-                                res.append(classifier._fallback_heuristic_predict(p))
-                            return np.array(res)
+                        with st.spinner("Scanning PCB board with sliding window and NMS..."):
+                            results = inspector.inspect_image(
+                                target_board, stride=stride, conf_threshold=conf_thresh
+                            )
 
-                    active_model = classifier.model if classifier.model is not None else MockKerasModel()
-                    inspector = SlidingWindowInspector(active_model)
-                    inspector.config.iou_nms_threshold = iou_thresh
+                        st.success(f"Scan complete: {results['total_windows_scanned']} patches evaluated. {len(results['detections'])} defects localized.")
+                        st.image(results["annotated_image"], caption="Annotated Inspection Result", use_container_width=True)
 
-                    with st.spinner("Scanning PCB board with sliding window and NMS..."):
-                        results = inspector.inspect_image(
-                            target_board, stride=stride, conf_threshold=conf_thresh
-                        )
+                        if results["detections"]:
+                            st.markdown("#### Detected Defects Summary")
+                            det_table = [
+                                {
+                                    "Defect Category": d["class_name"],
+                                    "Confidence": f"{d['confidence'] * 100:.1f}%",
+                                    "Bounding Box (x1, y1, x2, y2)": str(d["box"])
+                                }
+                                for d in results["detections"]
+                            ]
+                            st.table(det_table)
 
-                    st.success(f"Scan complete: {results['total_windows_scanned']} patches evaluated. {len(results['detections'])} defects localized.")
-
-                    st.image(results["annotated_image"], caption="Annotated Inspection Result", use_container_width=True)
-
-                    if results["detections"]:
-                        st.markdown("#### Detected Defects Summary")
-                        det_table = [
-                            {
-                                "Defect Category": d["class_name"],
-                                "Confidence": f"{d['confidence'] * 100:.1f}%",
-                                "Bounding Box (x1, y1, x2, y2)": str(d["box"])
-                            }
-                            for d in results["detections"]
-                        ]
-                        st.table(det_table)
-
-                    # Download button for annotated image
-                    is_success, buffer = cv2.imencode(".png", results["annotated_image"])
-                    if is_success:
-                        st.download_button(
-                            label="📥 Download Annotated Inspection Image",
-                            data=buffer.tobytes(),
-                            file_name="pcb_inspection_annotated.png",
-                            mime="image/png"
-                        )
+                        is_success, buffer = cv2.imencode(".png", results["annotated_image"])
+                        if is_success:
+                            st.download_button(
+                                label="📥 Download Annotated Inspection Image",
+                                data=buffer.tobytes(),
+                                file_name="pcb_inspection_annotated.png",
+                                mime="image/png"
+                            )
 
 
 # ==============================================================================
